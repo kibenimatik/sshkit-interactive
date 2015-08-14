@@ -9,8 +9,6 @@ module SSHKit
         @remote_command = remote_command
       end
 
-      # description:
-      # http://net-ssh.github.io/net-ssh/classes/Net/SSH.html#method-c-start
       def netssh_options
         self.host.netssh_options
       end
@@ -23,44 +21,18 @@ module SSHKit
         self.host.hostname
       end
 
-      def forward_agent?
-        !!self.netssh_options[:forward_agent]
-      end
-
-      def keys
-        self.netssh_options[:keys] || []
-      end
-
-      def auth_methods
-        self.netssh_options[:auth_methods]
-      end
-
-      def auth_methods_str
-        self.auth_methods.join(',')
-      end
-
-      def proxy
-        self.netssh_options[:proxy]
-      end
-
-      def proxy_command
-        self.proxy.command_line_template
-      end
-
-      def port
-        self.netssh_options[:port]
-      end
-
       def options
         opts = []
-        opts << '-A' if self.forward_agent?
-        self.keys.each do |key|
-          opts << "-i #{key}"
+        opts << '-A' if netssh_options[:forward_agent]
+        if netssh_options[:keys]
+          netssh_options[:keys].each do |k|
+            opts << "-i #{k}"
+          end
         end
-        opts << "-l #{self.user}" if self.user
-        opts << %{-o "PreferredAuthentications #{self.auth_methods_str}"} if self.auth_methods
-        opts << %{-o "ProxyCommand #{self.proxy_command}"} if self.proxy
-        opts << "-p #{self.port}" if self.port
+        opts << "-l #{user}" if user
+        opts << %{-o "PreferredAuthentications #{netssh_options[:auth_methods].join(',')}"} if netssh_options[:auth_methods]
+        opts << %{-o "ProxyCommand #{netssh_options[:proxy].command_line_template}"} if netssh_options[:proxy]
+        opts << "-p #{netssh_options[:port]}" if netssh_options[:port]
         opts << '-t' if self.remote_command
 
         opts
@@ -70,62 +42,43 @@ module SSHKit
         self.options.join(' ')
       end
 
-      def remote_user
-        if self.remote_command.is_a?(SSHKit::Command)
-          self.remote_command.options[:user]
+      def remote_command_str
+        if self.remote_command
+          cmd = []
+          cmd << remote_pwd if !remote_pwd.empty?
+          cmd << remote_env if !remote_env.empty?
+          cmd << "#{self.remote_command}"
+          %{"#{cmd.join(' ')}"}
         else
-          nil
-        end
-      end
-
-      def su_command
-        if self.remote_user
-          "sudo -u #{self.remote_user}"
-        else
-          nil
-        end
-      end
-
-      def path
-        if self.remote_command.is_a?(SSHKit::Command)
-          self.remote_command.options[:in]
-        else
-          nil
-        end
-      end
-
-      def cd_command
-        if self.path
-          "cd #{self.path}"
-        else
-          nil
-        end
-      end
-
-      def remote_commands
-        [
-          self.su_command,
-          self.cd_command,
-          self.remote_command
-        ].compact
-      end
-
-      def remote_commands_str
-        cmd = self.remote_commands.join(' && ')
-        if cmd.empty?
           ''
+        end
+      end
+
+      def remote_pwd
+        if self.remote_command.options[:in]
+          "cd #{self.remote_command.options[:in]} &&"
         else
-          %{"#{cmd}"}
+          ''
+        end
+      end
+
+      def remote_env
+        if self.remote_command.options[:env]
+          env = self.remote_command.options[:env].map{|k, v| "#{k.upcase}=#{v}"}.join(' ')
+        else
+          ''
         end
       end
 
       def to_s
-        [
+        parts = [
           'ssh',
           self.options_str,
           self.hostname,
-          self.remote_commands_str
-        ].reject(&:empty?).join(' ')
+          self.remote_command_str
+        ]
+
+        parts.reject(&:empty?).join(' ')
       end
 
       def execute
